@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>😀 Projects - ABoatInTheSky</title>
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --radius: 1rem;
+      --shadow: 0 1rem 3rem rgba(0, 0, 0, 0.2);
+      --content-width: min(92vw, 70rem);
+      --space-3: 1rem;
+      --space-4: 1.5rem;
+      --space-5: 2rem;
+      --font-xl: clamp(1.8rem, 4vw, 3rem);
+      --font-hero: clamp(2.4rem, 7vw, 5rem);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      font-size: 100%;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, #020617 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+
+    main {
+      display: grid;
+      gap: clamp(3rem, 8vw, 6rem);
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(0.8rem);
+      background: rgba(2, 6, 23, 0.75);
+    }
+
+    .nav {
+      width: var(--content-width);
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      padding: var(--space-3) 0;
+      flex-wrap: wrap;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: var(--space-3);
+    }
+
+    .hero {
+      width: var(--content-width);
+      margin: 0 auto;
+      padding: clamp(2rem, 8vw, 5rem) 0;
+    }
+
+    .hero-card {
+      background: rgba(17, 24, 39, 0.8);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: clamp(1.5rem, 4vw, 3rem);
+    }
+
+    h1 {
+      margin: 0 0 var(--space-3);
+      font-size: var(--font-hero);
+    }
+
+    .hero-text {
+      max-width: 65ch;
+      color: var(--muted);
+    }
+
+    .section {
+      width: var(--content-width);
+      margin: 0 auto;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+      gap: var(--space-4);
+    }
+
+    .card {
+      background: rgba(17, 24, 39, 0.7);
+      border-radius: var(--radius);
+      padding: var(--space-4);
+      box-shadow: var(--shadow);
+      transition: 0.2s;
+    }
+
+    .card:hover {
+      transform: translateY(-0.3rem);
+      box-shadow: 0 1.5rem 3.5rem rgba(0,0,0,0.35);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-3);
+      margin-top: var(--space-3);
+    }
+
+    .button {
+      padding: 0.8em 1.3em;
+      border-radius: 999rem;
+      font-weight: bold;
+    }
+
+    .button-primary {
+      background: var(--accent);
+      color: #082f49;
+    }
+
+    .button-secondary {
+      background: rgba(148,163,184,0.15);
+    }
+
+    .site-footer {
+      width: var(--content-width);
+      margin: 0 auto;
+      padding: 0 0 var(--space-5);
+      color: rgba(148, 163, 184, 0.55);
+      border-top: 0.08rem solid rgba(148, 163, 184, 0.12);
+    }
+  </style>
+</head>
+
+<body>
+
+<header class="site-header">
+  <nav class="nav">
+    <a href="index.html">ABoatInTheSky</a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="index.html#about">About</a>
+      <a href="projects.html">Projects</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+
+  <section class="hero">
+    <div class="hero-card">
+      <h1>Stuff I have made</h1>
+      <p class="hero-text">
+        Here are some projects of mine, most are on my channel (thats why I have it), so these are mostly the ones off platform.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="grid">
+
+      <div class="card">
+        <h3>Channel</h3>
+        <p>Main hub for everything.</p>
+        <div class="actions">
+          <a class="button button-primary" href="https://www.youtube.com/channel/UCdfsYxFhoumM2NvKHqBbswg" target="_blank">Go see!</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Obby Game</h3>
+        <p>Simple Roblox obby game.</p>
+        <div class="actions">
+          <a class="button button-secondary" href="https://www.youtube.com/watch?v=uAXDuQpeJEU" target="_blank">Trailer</a>
+          <a class="button button-primary" href="https://www.roblox.com/games/89468312029758/Not-The-Longest-Obby-On-Roblox" target="_blank">Play</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Clicker Game</h3>
+        <p>My first real game.</p>
+        <div class="actions">
+          <a class="button button-primary" href="https://aboatinthesky.itch.io/red-button-clicker-game-simulator-experience" target="_blank">Download</a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <p>© 2026 A Boat In The Sky</p>
+</footer>
+
+</body>
+</html>
