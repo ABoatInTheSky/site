@@ -51,7 +51,7 @@
         main {
           display: grid;
           gap: clamp(3rem, 8vw, 6rem);
-          padding-bottom: var(--space-6);
+          padding-bottom: 0;
         }
 
         a {
@@ -227,7 +227,7 @@
 
         .site-footer {
           width: var(--content-width);
-          margin: 0 auto;
+          margin: var(--space-6) auto 0;
           padding: 0 0 var(--space-5);
           color: rgba(148, 163, 184, 0.5);
           border-top: 0.08rem solid rgba(148, 163, 184, 0.12);
@@ -239,20 +239,20 @@
         }
 
         .footer-links {
-      display: flex;
-      gap: var(--space-3);
-      margin-bottom: var(--space-2);
-      flex-wrap: wrap;
-    }
+          display: flex;
+          gap: var(--space-3);
+          margin-bottom: var(--space-2);
+          flex-wrap: wrap;
+        }
 
-    .footer-links a {
-      color: var(--muted);
-      transition: color 0.2s ease;
-    }
+        .footer-links a {
+          color: var(--muted);
+          transition: color 0.2s ease;
+        }
 
-    .footer-links a:hover {
-      color: var(--text);
-    }
+        .footer-links a:hover {
+          color: var(--text);
+        }
 
         @media (max-width: 48rem) {
           .nav {

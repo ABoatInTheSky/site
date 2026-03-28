@@ -195,11 +195,11 @@
         }
 
         .site-footer {
-           width: var(--content-width);
-           margin: 0 auto;
-           padding: 0 0 var(--space-5);
-           color: rgba(148, 163, 184, 0.55);
-           border-top: 0.08rem solid rgba(148, 163, 184, 0.12);
+          width: var(--content-width);
+          margin: var(--space-6) auto 0;
+          padding: 0 0 var(--space-5);
+          color: rgba(148, 163, 184, 0.55);
+          border-top: 0.08rem solid rgba(148, 163, 184, 0.12);
         }
 
         .grid {
@@ -234,20 +234,20 @@
         }
 
         .footer-links {
-      display: flex;
-      gap: var(--space-3);
-      margin-bottom: var(--space-2);
-      flex-wrap: wrap;
-    }
+          display: flex;
+          gap: var(--space-3);
+          margin-bottom: var(--space-2);
+          flex-wrap: wrap;
+        }
 
-    .footer-links a {
-      color: var(--muted);
-      transition: color 0.2s ease;
-    }
+        .footer-links a {
+          color: var(--muted);
+          transition: color 0.2s ease;
+        }
 
-    .footer-links a:hover {
-      color: var(--text);
-    }
+        .footer-links a:hover {
+          color: var(--text);
+        }
 
         @media (max-width: 48rem) {
           .nav {
@@ -272,15 +272,16 @@
 <body>
 <header class="site-header">
     <nav class="nav" aria-label="Main navigation">
-        <a class="brand" href="#top">ABoatInTheSky</a>
+        <a class="brand" href="index.html">ABoatInTheSky</a>
         <div class="nav-links">
-            <a href="#about">About</a>
+            <a href="index.html">Home</a>
+            <a href="index.html#about">About</a>
             <a href="projects.html">Projects</a>
         </div>
     </nav>
 </header>
 
-<main id="top">
+<main>
     <section class="hero">
         <div class="hero-card">
             <div class="eyebrow">Website is yes</div>
