@@ -138,7 +138,7 @@
           max-width: 65ch;
           color: var(--muted);
           font-size: var(--font-lg);
-          margin-bottom: var(--space-4);
+          margin-bottom: 0;
         }
 
         .actions {
@@ -184,7 +184,67 @@
         .section-text {
           color: var(--muted);
           max-width: 85ch;
+          margin: 0 0 var(--space-5);
+        }
+
+        .game-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+          gap: var(--space-4);
+        }
+
+        .game-card {
+          position: relative;
+          display: block;
+          border-radius: var(--radius);
+          overflow: hidden;
+          background: rgba(17, 24, 39, 0.7);
+          border: 0.08rem solid rgba(148, 163, 184, 0.15);
+          box-shadow: var(--shadow);
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .game-card:hover,
+        .game-card:focus-visible {
+          transform: translateY(-0.3rem);
+          box-shadow: 0 1.5rem 3.5rem rgba(0, 0, 0, 0.35);
+        }
+
+        .game-card img {
+          width: 100%;
+          aspect-ratio: 16 / 9;
+          object-fit: cover;
+          display: block;
+        }
+
+        .game-card-info {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          min-height: 34%;
+          padding: var(--space-3);
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+          background: linear-gradient(
+            to top,
+            rgba(2, 6, 23, 0.96),
+            rgba(2, 6, 23, 0.72),
+            rgba(2, 6, 23, 0)
+          );
+        }
+
+        .game-card-title {
           margin: 0;
+          font-size: 1.15rem;
+          font-weight: 700;
+        }
+
+        .game-card-desc {
+          margin: 0.2rem 0 0;
+          color: var(--muted);
+          font-size: var(--font-sm);
         }
 
         .site-footer {
@@ -252,14 +312,19 @@
             <p class="hero-text">
                 Games you can play right now
             </p>
-            <div class="actions">
-                <a class="button button-primary" href="/">Home</a>
-            </div>
         </div>
     </section>
 
     <section class="section">
-        <p class="section-text">No games here yet</p>
+        <div class="game-grid">
+            <a class="game-card" href="/web-games/dodge-the-rain/">
+                <img src="/web-games/dodge-the-rain/thumbnail.png" alt="Dodge The Rain thumbnail">
+                <div class="game-card-info">
+                    <p class="game-card-title">Dodge The Rain</p>
+                    <p class="game-card-desc">Dodge the falling rain drops for as long as you can!</p>
+                </div>
+            </a>
+        </div>
     </section>
 </main>
 
