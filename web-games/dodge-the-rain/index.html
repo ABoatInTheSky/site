@@ -118,12 +118,14 @@
           padding: 0.9em 1.4em;
           border-radius: 999rem;
           font-weight: 700;
+          cursor: pointer;
           transition: transform 0.2s ease, opacity 0.2s ease, background 0.2s ease;
         }
 
         .button-primary {
           background: var(--accent);
           color: #082f49;
+          border: none;
         }
 
         .button-secondary {
@@ -189,6 +191,11 @@
           padding: var(--space-4);
         }
 
+        .game-frame-shell {
+          position: relative;
+          width: 100%;
+        }
+
         .game-frame {
           position: relative;
           width: 100%;
@@ -249,37 +256,7 @@
           width: min(90%, 36rem);
         }
 
-        #unity-footer {
-          position: absolute;
-          right: 1rem;
-          bottom: 1rem;
-          z-index: 6;
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-        }
-
-        #unity-fullscreen-button {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-width: 9rem;
-          padding: 0.8em 1.2em;
-          border-radius: 999rem;
-          font-weight: 700;
-          background: rgba(148, 163, 184, 0.12);
-          border: 0.08rem solid rgba(148, 163, 184, 0.2);
-          color: var(--text);
-          cursor: pointer;
-          transition: transform 0.2s ease, opacity 0.2s ease;
-        }
-
-        #unity-fullscreen-button:hover,
-        #unity-fullscreen-button:focus-visible {
-          transform: translateY(-0.12rem);
-          opacity: 0.95;
-        }
-
+        #unity-footer,
         #unity-build-title,
         #unity-logo,
         #unity-logo-title-footer {
@@ -288,6 +265,12 @@
 
         .info-panel {
           padding: clamp(1.5rem, 3vw, 2rem);
+        }
+
+        .info-panel-top {
+          display: flex;
+          justify-content: flex-start;
+          margin-bottom: var(--space-4);
         }
 
         .info-panel h2 {
@@ -300,6 +283,47 @@
           margin: 0;
           color: var(--muted);
           white-space: pre-line;
+        }
+
+        .fullscreen-exit {
+          position: fixed;
+          top: 1rem;
+          left: 50%;
+          transform: translateX(-50%) scale(1);
+          z-index: 9999;
+          display: none;
+          min-width: 10rem;
+          transition: transform 0.2s ease, opacity 0.2s ease, background 0.2s ease;
+        }
+
+        .fullscreen-exit.show {
+          display: inline-flex;
+        }
+
+        .fullscreen-exit:hover,
+        .fullscreen-exit:focus-visible {
+          transform: translateX(-50%) scale(1.05);
+          opacity: 0.95;
+        }
+
+        .game-frame-shell.is-fullscreen {
+          position: fixed;
+          inset: 0;
+          width: 100vw;
+          height: 100vh;
+          background: #000;
+          z-index: 9000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .game-frame-shell.is-fullscreen .game-frame {
+          width: min(100vw, calc(100vh * 16 / 9));
+          height: min(100vh, calc(100vw * 9 / 16));
+          aspect-ratio: 16 / 9;
+          border-radius: 0;
+          border: none;
         }
 
         .site-footer {
@@ -347,14 +371,14 @@
             align-items: stretch;
           }
 
-          #unity-footer {
-            right: 0.75rem;
-            bottom: 0.75rem;
+          .info-panel-top {
+            justify-content: stretch;
           }
 
-          #unity-fullscreen-button {
-            min-width: auto;
-            padding: 0.7em 1em;
+          .fullscreen-exit {
+            top: 0.75rem;
+            width: calc(100vw - 1.5rem);
+            max-width: 20rem;
           }
         }
     </style>
@@ -372,6 +396,10 @@
     </nav>
 </header>
 
+<button id="exit-fullscreen-button" class="button button-secondary fullscreen-exit" type="button">
+    Exit Fullscreen
+</button>
+
 <main class="page">
     <div class="top-actions">
         <a class="button button-secondary" href="/web-games/">Back to Web Games</a>
@@ -387,27 +415,34 @@
 
     <section class="game-layout">
         <div class="game-panel">
-            <div class="game-frame">
-                <div id="unity-container" class="unity-desktop">
-                    <canvas id="unity-canvas" width="1920" height="1080" tabindex="-1"></canvas>
+            <div id="game-frame-shell" class="game-frame-shell">
+                <div class="game-frame">
+                    <div id="unity-container" class="unity-desktop">
+                        <canvas id="unity-canvas" width="1920" height="1080" tabindex="-1"></canvas>
 
-                    <div id="unity-loading-bar">
-                        <div id="unity-progress-bar-empty">
-                            <div id="unity-progress-bar-full"></div>
+                        <div id="unity-loading-bar">
+                            <div id="unity-progress-bar-empty">
+                                <div id="unity-progress-bar-full"></div>
+                            </div>
                         </div>
-                    </div>
 
-                    <div id="unity-warning"></div>
+                        <div id="unity-warning"></div>
 
-                    <div id="unity-footer">
-                        <div id="unity-fullscreen-button">Fullscreen</div>
-                        <div id="unity-build-title">Dodge The Rain</div>
+                        <div id="unity-footer">
+                            <div id="unity-logo-title-footer"></div>
+                            <div id="unity-fullscreen-button"></div>
+                            <div id="unity-build-title">Dodge The Rain</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
         <aside class="info-panel">
+            <div class="info-panel-top">
+                <button id="fullscreen-button" class="button button-secondary" type="button">Fullscreen</button>
+            </div>
+
             <h2>About</h2>
             <p>Dodge the falling rain drops for as long as you can!
 To play use:
@@ -436,6 +471,9 @@ Version 1.0</p>
 
 <script>
     var canvas = document.querySelector("#unity-canvas");
+    var fullscreenButton = document.querySelector("#fullscreen-button");
+    var exitFullscreenButton = document.querySelector("#exit-fullscreen-button");
+    var gameFrameShell = document.querySelector("#game-frame-shell");
 
     function unityShowBanner(msg, type) {
       var warningBanner = document.querySelector("#unity-warning");
@@ -468,6 +506,30 @@ Version 1.0</p>
       updateBannerVisibility();
     }
 
+    function enterFullscreenMode() {
+      gameFrameShell.classList.add("is-fullscreen");
+      exitFullscreenButton.classList.add("show");
+    }
+
+    function exitFullscreenMode() {
+      gameFrameShell.classList.remove("is-fullscreen");
+      exitFullscreenButton.classList.remove("show");
+    }
+
+    fullscreenButton.onclick = function () {
+      enterFullscreenMode();
+    };
+
+    exitFullscreenButton.onclick = function () {
+      exitFullscreenMode();
+    };
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && gameFrameShell.classList.contains("is-fullscreen")) {
+        exitFullscreenMode();
+      }
+    });
+
     var buildUrl = "Build";
     var loaderUrl = buildUrl + "/dodge-the-rain.loader.js";
     var config = {
@@ -480,19 +542,13 @@ Version 1.0</p>
       productName: "Dodge The Rain",
       productVersion: "1.0",
       showBanner: unityShowBanner,
-      matchWebGLToCanvasSize: false,
-      devicePixelRatio: 1
     };
-
-    canvas.width = 1920;
-    canvas.height = 1080;
 
     if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
       var meta = document.createElement("meta");
       meta.name = "viewport";
       meta.content = "width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes";
       document.getElementsByTagName("head")[0].appendChild(meta);
-
       document.querySelector("#unity-container").className = "unity-mobile";
       canvas.className = "unity-mobile";
     }
@@ -503,12 +559,9 @@ Version 1.0</p>
     script.src = loaderUrl;
     script.onload = function () {
       createUnityInstance(canvas, config, function (progress) {
-        document.querySelector("#unity-progress-bar-full").style.width = (100 * progress) + "%";
-      }).then(function (unityInstance) {
+        document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
+      }).then(function () {
         document.querySelector("#unity-loading-bar").style.display = "none";
-        document.querySelector("#unity-fullscreen-button").onclick = function () {
-          unityInstance.SetFullscreen(1);
-        };
       }).catch(function (message) {
         alert(message);
       });
