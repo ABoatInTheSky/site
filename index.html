@@ -203,37 +203,6 @@
           border-top: 0.08rem solid rgba(148, 163, 184, 0.12);
         }
 
-        .grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
-          gap: var(--space-4);
-        }
-
-        .card {
-          background: rgba(17, 24, 39, 0.7);
-          border: 0.08rem solid rgba(148, 163, 184, 0.15);
-          border-radius: var(--radius);
-          padding: var(--space-4);
-          box-shadow: var(--shadow);
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .card:hover {
-          transform: translateY(-0.3rem);
-          box-shadow: 0 1.5rem 3.5rem rgba(0, 0, 0, 0.35);
-        }
-
-        .card h3 {
-          margin-top: 0;
-          margin-bottom: var(--space-2);
-          font-size: 1.2rem;
-        }
-
-        .card p {
-          margin: 0;
-          color: var(--muted);
-        }
-
         .footer-links {
           display: flex;
           gap: var(--space-3);
@@ -278,6 +247,7 @@
             <a href="/">Home</a>
             <a href="/#about">About</a>
             <a href="/projects/">Projects</a>
+            <a href="/web-games/">Web Games</a>
         </div>
     </nav>
 </header>
@@ -313,12 +283,23 @@
             <a class="button button-primary" href="/projects/">Go to Projects</a>
         </div>
     </section>
+
+    <section class="section" id="web-games">
+        <h2 class="section-title">Web Games</h2>
+        <p class="section-text">
+            Games you can play right now
+        </p>
+        <div class="actions">
+            <a class="button button-primary" href="/web-games/">Open Web Games</a>
+        </div>
+    </section>
 </main>
 
 <footer class="site-footer">
     <div class="footer-links">
         <a href="/">Home</a>
         <a href="/projects/">Projects</a>
+        <a href="/web-games/">Web Games</a>
     </div>
     <p>© 2026 A Boat In The Sky. All rights reserved.</p>
 </footer>
