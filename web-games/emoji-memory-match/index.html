@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emoji Memory Match - ABoatInTheSky</title>
+    <link rel="icon" type="image/png" href="../../favicon.png">
+    <style>
+        :root {
+          --bg: #0f172a;
+          --panel: #111827;
+          --text: #e5e7eb;
+          --muted: #94a3b8;
+          --accent: #38bdf8;
+          --radius: 1rem;
+          --shadow: 0 1rem 3rem rgba(0, 0, 0, 0.2);
+          --content-width: min(92vw, 110rem);
+          --space-1: 0.5rem;
+          --space-2: 0.75rem;
+          --space-3: 1rem;
+          --space-4: 1.5rem;
+          --space-5: 2rem;
+          --space-6: 3rem;
+          --space-7: 4rem;
+          --font-sm: 0.95rem;
+          --font-base: 1rem;
+          --font-lg: 1.2rem;
+          --font-xl: clamp(1.8rem, 4vw, 3rem);
+          --font-hero: clamp(2.2rem, 6vw, 4rem);
+        }
+
+        * {
+          box-sizing: border-box;
+        }
+
+        html {
+          scroll-behavior: smooth;
+          font-size: 100%;
+        }
+
+        body {
+          margin: 0;
+          min-height: 100vh;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: var(--font-base);
+          line-height: 1.6;
+          background: linear-gradient(180deg, #020617 0%, var(--bg) 100%);
+          color: var(--text);
+        }
+
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+
+        button {
+          font: inherit;
+        }
+
+        .site-header {
+          position: sticky;
+          top: 0;
+          z-index: 30;
+          backdrop-filter: blur(0.8rem);
+          background: rgba(2, 6, 23, 0.75);
+          border-bottom: 0.08rem solid rgba(148, 163, 184, 0.15);
+        }
+
+        .nav {
+          width: var(--content-width);
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-3);
+          padding: var(--space-3) 0;
+          flex-wrap: wrap;
+        }
+
+        .brand {
+          font-size: var(--font-lg);
+          font-weight: 700;
+          letter-spacing: 0.04em;
+        }
+
+        .nav-links {
+          display: flex;
+          gap: var(--space-3);
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .nav-links a {
+          color: var(--muted);
+          transition: color 0.2s ease;
+        }
+
+        .nav-links a:hover,
+        .nav-links a:focus-visible {
+          color: var(--text);
+        }
+
+        .page {
+          width: var(--content-width);
+          margin: 0 auto;
+          padding: clamp(1.5rem, 4vw, 3rem) 0 var(--space-6);
+        }
+
+        .top-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: var(--space-3);
+          margin-bottom: var(--space-4);
+        }
+
+        .button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 10rem;
+          padding: 0.9em 1.4em;
+          border-radius: 999rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: transform 0.2s ease, opacity 0.2s ease, background 0.2s ease;
+          border: none;
+        }
+
+        .button-primary {
+          background: var(--accent);
+          color: #082f49;
+        }
+
+        .button-secondary {
+          background: rgba(148, 163, 184, 0.12);
+          border: 0.08rem solid rgba(148, 163, 184, 0.2);
+          color: var(--text);
+        }
+
+        .button:hover,
+        .button:focus-visible {
+          transform: translateY(-0.12rem);
+          opacity: 0.95;
+        }
+
+        .hero-card {
+          background: rgba(17, 24, 39, 0.8);
+          border: 0.08rem solid rgba(148, 163, 184, 0.18);
+          border-radius: var(--radius);
+          box-shadow: var(--shadow);
+          padding: clamp(1.5rem, 4vw, 2.5rem);
+          margin-bottom: var(--space-5);
+        }
+
+        .eyebrow {
+          color: var(--accent);
+          font-size: var(--font-sm);
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          margin-bottom: var(--space-2);
+        }
+
+        h1 {
+          margin: 0 0 var(--space-3);
+          font-size: var(--font-hero);
+          line-height: 1.05;
+        }
+
+        .hero-text {
+          color: var(--muted);
+          max-width: 65ch;
+          margin: 0;
+          font-size: var(--font-lg);
+        }
+
+        .game-layout {
+          display: grid;
+          grid-template-columns: minmax(0, 3fr) minmax(18rem, 1.1fr);
+          gap: var(--space-5);
+          align-items: start;
+        }
+
+        .game-panel,
+        .info-panel {
+          background: rgba(17, 24, 39, 0.78);
+          border: 0.08rem solid rgba(148, 163, 184, 0.16);
+          border-radius: var(--radius);
+          box-shadow: var(--shadow);
+          overflow: hidden;
+        }
+
+        .game-panel {
+          padding: var(--space-4);
+        }
+
+        .game-frame-shell {
+          position: relative;
+          width: 100%;
+        }
+
+        .game-frame {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 16 / 9;
+          background: #000;
+          border-radius: 0.8rem;
+          overflow: hidden;
+          border: 0.08rem solid rgba(148, 163, 184, 0.12);
+        }
+
+        #game-canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+          background: #020617;
+          touch-action: manipulation;
+        }
+
+        .info-panel {
+          padding: clamp(1.5rem, 3vw, 2rem);
+        }
+
+        .info-panel-top {
+          display: flex;
+          justify-content: flex-start;
+          margin-bottom: var(--space-4);
+        }
+
+        .info-panel h2 {
+          margin-top: 0;
+          margin-bottom: var(--space-3);
+          font-size: 1.5rem;
+        }
+
+        .info-panel p {
+          margin: 0;
+          color: var(--muted);
+          white-space: pre-line;
+        }
+
+        .fullscreen-exit {
+          position: fixed;
+          top: 1rem;
+          left: 50%;
+          transform: translateX(-50%) scale(1);
+          z-index: 9999;
+          display: none;
+          min-width: 10rem;
+          transition: transform 0.2s ease, opacity 0.2s ease, background 0.2s ease;
+        }
+
+        .fullscreen-exit.show {
+          display: inline-flex;
+        }
+
+        .fullscreen-exit:hover,
+        .fullscreen-exit:focus-visible {
+          transform: translateX(-50%) scale(1.05);
+          opacity: 0.95;
+        }
+
+        .game-frame-shell.is-fullscreen {
+          position: fixed;
+          inset: 0;
+          width: 100vw;
+          height: 100vh;
+          background: #000;
+          z-index: 9000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .game-frame-shell.is-fullscreen .game-frame {
+          width: min(100vw, calc(100vh * 16 / 9));
+          height: min(100vh, calc(100vw * 9 / 16));
+          aspect-ratio: 16 / 9;
+          border-radius: 0;
+          border: none;
+        }
+
+        .site-footer {
+          width: var(--content-width);
+          margin: 0 auto;
+          padding: 0 0 var(--space-5);
+          color: rgba(148, 163, 184, 0.55);
+          border-top: 0.08rem solid rgba(148, 163, 184, 0.12);
+        }
+
+        .footer-links {
+          display: flex;
+          gap: var(--space-3);
+          margin: var(--space-4) 0 var(--space-2);
+          flex-wrap: wrap;
+        }
+
+        .footer-links a {
+          color: var(--muted);
+          transition: color 0.2s ease;
+        }
+
+        .footer-links a:hover,
+        .footer-links a:focus-visible {
+          color: var(--text);
+        }
+
+        @media (max-width: 90rem) {
+          .game-layout {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 48rem) {
+          .nav {
+            justify-content: center;
+          }
+
+          .button {
+            width: 100%;
+          }
+
+          .top-actions {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .info-panel-top {
+            justify-content: stretch;
+          }
+
+          .fullscreen-exit {
+            top: 0.75rem;
+            width: calc(100vw - 1.5rem);
+            max-width: 20rem;
+          }
+        }
+    </style>
+</head>
+<body>
+<header class="site-header">
+    <nav class="nav" aria-label="Main navigation">
+        <a class="brand" href="/">ABoatInTheSky</a>
+        <div class="nav-links">
+            <a href="/">Home</a>
+            <a href="/#about">About</a>
+            <a href="/projects/">Projects</a>
+            <a href="/web-games/">Web Games</a>
+        </div>
+    </nav>
+</header>
+
+<button id="exit-fullscreen-button" class="button button-secondary fullscreen-exit" type="button">
+    Exit Fullscreen
+</button>
+
+<main class="page">
+    <div class="top-actions">
+        <a class="button button-secondary" href="/web-games/">Back to Web Games</a>
+    </div>
+
+    <section class="hero-card">
+        <div class="eyebrow">Web Game</div>
+        <h1>Emoji Memory Match</h1>
+        <p class="hero-text">
+            Match the emojis to win!
+        </p>
+    </section>
+
+    <section class="game-layout">
+        <div class="game-panel">
+            <div id="game-frame-shell" class="game-frame-shell">
+                <div class="game-frame">
+                    <canvas id="game-canvas" width="1920" height="1080" aria-label="Emoji Memory Match game canvas"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <aside class="info-panel">
+            <div class="info-panel-top">
+                <button id="fullscreen-button" class="button button-secondary" type="button">Fullscreen</button>
+            </div>
+
+            <h2>About</h2>
+            <p>Match the emojis! There are 5 game modes: Easy, Medium, Hard, Insane, No.
+
+Have fun!
+
+
+Version 1.0</p>
+        </aside>
+    </section>
+</main>
+
+<footer class="site-footer">
+    <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="/projects/">Projects</a>
+        <a href="/web-games/">Web Games</a>
+    </div>
+    <p>© 2026 A Boat In The Sky. All rights reserved.</p>
+</footer>
+
+<script src="game.js"></script>
+<script>
+    const fullscreenButton = document.querySelector("#fullscreen-button");
+    const exitFullscreenButton = document.querySelector("#exit-fullscreen-button");
+    const gameFrameShell = document.querySelector("#game-frame-shell");
+
+    function enterFullscreenMode() {
+      gameFrameShell.classList.add("is-fullscreen");
+      exitFullscreenButton.classList.add("show");
+    }
+
+    function exitFullscreenMode() {
+      gameFrameShell.classList.remove("is-fullscreen");
+      exitFullscreenButton.classList.remove("show");
+    }
+
+    fullscreenButton.onclick = function () {
+      enterFullscreenMode();
+    };
+
+    exitFullscreenButton.onclick = function () {
+      exitFullscreenMode();
+    };
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && gameFrameShell.classList.contains("is-fullscreen")) {
+        exitFullscreenMode();
+      }
+    });
+</script>
+</body>
+</html>
