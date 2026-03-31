@@ -1,10 +1,11 @@
 const audioFileInput = document.getElementById("audio-file");
 const imageFileInput = document.getElementById("image-file");
+const yResSelect = document.getElementById("y-res-select");
+
 const startRecordButton = document.getElementById("start-record-button");
 const stopRecordButton = document.getElementById("stop-record-button");
 const convertToImageButton = document.getElementById("convert-to-image-button");
 const updatePreviewButton = document.getElementById("update-preview-button");
-const continueButton = document.getElementById("continue-button");
 const buildAudioButton = document.getElementById("build-audio-button");
 const downloadPngButton = document.getElementById("download-png-button");
 const downloadAudioButton = document.getElementById("download-audio-button");
@@ -15,7 +16,7 @@ const effectsStatus = document.getElementById("effects-status");
 const outputStatus = document.getElementById("output-status");
 
 const spectrogramCanvas = document.getElementById("spectrogram-canvas");
-const spectrogramContext = spectrogramCanvas.getContext("2d");
+const spectrogramContext = spectrogramCanvas.getContext("2d", { willReadFrequently: true });
 
 const imageWidthLabel = document.getElementById("image-width");
 const imageHeightLabel = document.getElementById("image-height");
@@ -39,10 +40,6 @@ const effectBlurEnabled = document.getElementById("effect-blur-enabled");
 const effectBlurAmount = document.getElementById("effect-blur-amount");
 const effectBlurValue = document.getElementById("effect-blur-value");
 
-const effectRampEnabled = document.getElementById("effect-ramp-enabled");
-const effectRampAmount = document.getElementById("effect-ramp-amount");
-const effectRampValue = document.getElementById("effect-ramp-value");
-
 const effectClampEnabled = document.getElementById("effect-clamp-enabled");
 const effectClampAmount = document.getElementById("effect-clamp-amount");
 const effectClampValue = document.getElementById("effect-clamp-value");
@@ -50,22 +47,33 @@ const effectClampValue = document.getElementById("effect-clamp-value");
 const effectInvertEnabled = document.getElementById("effect-invert-enabled");
 const effectInvertValue = document.getElementById("effect-invert-value");
 
+const outputGainAmount = document.getElementById("output-gain-amount");
+const outputGainValue = document.getElementById("output-gain-value");
+const outputLimitAmount = document.getElementById("output-limit-amount");
+const outputLimitValue = document.getElementById("output-limit-value");
+
 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+const TARGET_OUTPUT_RMS = 0.55;
+const WINDOW_RMS_SIZE = 1024;
+const WINDOW_RMS_HOP = 256;
+const WINDOW_GATE_RATIO = 0.35;
+const PRE_MANUAL_HEADROOM_PEAK = 0.72;
 
 const state = {
   selectedAudioBlob: null,
   selectedAudioBuffer: null,
-  baseMatrix: null,
-  processedMatrix: null,
-  lockedMatrix: null,
+  baseImage: null,
+  processedImage: null,
   importedImageInUse: false,
   lastOutputBlob: null,
   lastOutputUrl: null,
   mediaRecorder: null,
   mediaStream: null,
   recordedChunks: [],
-  stftWindowSize: 1024,
-  stftHopSize: 256,
+  fftSize: 4096,
+  hopSize: 512,
+  binCount: 2048,
   imageWidth: 0,
   imageHeight: 0
 };
@@ -94,14 +102,54 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+function getManualGainMultiplier() {
+  const value = Number(outputGainAmount.value);
+  return 1 + (value / 100);
+}
+
+function getLimiterSettings() {
+  const amount = Number(outputLimitAmount.value) / 100;
+
+  const spikeThreshold = lerp(0.18, 0.05, amount);
+  const preClipDrive = lerp(1.4, 3.6, amount);
+  const postClipDrive = lerp(1.2, 4.5, amount);
+
+  return {
+    amount,
+    spikeThreshold,
+    preClipDrive,
+    postClipDrive
+  };
+}
+
 function updateSliderLabels() {
   effectNoiseValue.textContent = `${effectNoiseAmount.value}%`;
   effectPitchValue.textContent = `${effectPitchAmount.value}%`;
   effectBrightnessValue.textContent = `${effectBrightnessAmount.value}%`;
   effectBlurValue.textContent = `${effectBlurAmount.value}%`;
-  effectRampValue.textContent = `${effectRampAmount.value}%`;
   effectClampValue.textContent = `${effectClampAmount.value}%`;
   effectInvertValue.textContent = effectInvertEnabled.checked ? "On" : "Off";
+
+  outputGainValue.textContent = `${outputGainAmount.value}%`;
+  outputLimitValue.textContent = `${outputLimitAmount.value}%`;
+}
+
+function updateButtonStates() {
+  const hasAudio = !!state.selectedAudioBuffer;
+  const hasBaseImage = !!state.baseImage;
+  const hasProcessedImage = !!state.processedImage;
+  const hasOutputAudio = !!state.lastOutputBlob;
+  const isRecording = !!state.mediaRecorder && state.mediaRecorder.state === "recording";
+
+  convertToImageButton.disabled = !hasAudio || isRecording;
+  imageFileInput.disabled = !hasBaseImage;
+  updatePreviewButton.disabled = !hasBaseImage;
+  downloadPngButton.disabled = !hasProcessedImage;
+  buildAudioButton.disabled = !hasBaseImage;
+  downloadAudioButton.disabled = !hasOutputAudio;
+
+  startRecordButton.disabled = isRecording;
+  stopRecordButton.disabled = !isRecording;
 }
 
 function create2DArray(width, height, fillValue = 0) {
@@ -115,8 +163,97 @@ function create2DArray(width, height, fillValue = 0) {
   return array;
 }
 
-function cloneMatrix(matrix) {
-  return matrix.map((row) => Float32Array.from(row));
+function clone2D(channel) {
+  return channel.map((row) => Float32Array.from(row));
+}
+
+function createRgbImage(width, height) {
+  return {
+    r: create2DArray(width, height),
+    g: create2DArray(width, height),
+    b: create2DArray(width, height)
+  };
+}
+
+function cloneRgbImage(image) {
+  return {
+    r: clone2D(image.r),
+    g: clone2D(image.g),
+    b: clone2D(image.b)
+  };
+}
+
+function getImageWidth(image) {
+  return image.r[0].length;
+}
+
+function getImageHeight(image) {
+  return image.r.length;
+}
+
+function createHannWindow(size) {
+  const windowValues = new Float32Array(size);
+  for (let i = 0; i < size; i += 1) {
+    windowValues[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
+  }
+  return windowValues;
+}
+
+function reverseBits(value, bits) {
+  let reversed = 0;
+  for (let i = 0; i < bits; i += 1) {
+    reversed = (reversed << 1) | (value & 1);
+    value >>= 1;
+  }
+  return reversed;
+}
+
+function fftComplex(real, imag, inverse = false) {
+  const n = real.length;
+  const levels = Math.log2(n);
+
+  if (!Number.isInteger(levels)) {
+    throw new Error("FFT size must be a power of 2.");
+  }
+
+  for (let i = 0; i < n; i += 1) {
+    const j = reverseBits(i, levels);
+    if (j > i) {
+      [real[i], real[j]] = [real[j], real[i]];
+      [imag[i], imag[j]] = [imag[j], imag[i]];
+    }
+  }
+
+  for (let size = 2; size <= n; size <<= 1) {
+    const halfSize = size >> 1;
+    const angleStep = (inverse ? 2 : -2) * Math.PI / size;
+
+    for (let start = 0; start < n; start += size) {
+      for (let j = 0; j < halfSize; j += 1) {
+        const angle = j * angleStep;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+
+        const evenIndex = start + j;
+        const oddIndex = evenIndex + halfSize;
+
+        const treal = real[oddIndex] * cos - imag[oddIndex] * sin;
+        const timag = real[oddIndex] * sin + imag[oddIndex] * cos;
+
+        real[oddIndex] = real[evenIndex] - treal;
+        imag[oddIndex] = imag[evenIndex] - timag;
+        real[evenIndex] += treal;
+        imag[evenIndex] += timag;
+      }
+    }
+  }
+
+  if (inverse) {
+    for (let i = 0; i < n; i += 1) {
+      real[i] /= n;
+      imag[i] /= n;
+    }
+  }
 }
 
 function getMonoChannelData(audioBuffer) {
@@ -138,84 +275,72 @@ function getMonoChannelData(audioBuffer) {
   return mono;
 }
 
-function createHannWindow(size) {
-  const windowValues = new Float32Array(size);
-  for (let i = 0; i < size; i += 1) {
-    windowValues[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
-  }
-  return windowValues;
+function configureResolutionSettings() {
+  state.binCount = Number(yResSelect.value);
+  state.fftSize = state.binCount * 2;
+  state.hopSize = Math.max(64, state.fftSize >> 3);
 }
 
-function computeMagnitudeSpectrum(frame, binCount) {
-  const magnitudes = new Float32Array(binCount);
-
-  for (let k = 0; k < binCount; k += 1) {
-    let real = 0;
-    let imag = 0;
-    const angularFactor = (-2 * Math.PI * k) / frame.length;
-
-    for (let n = 0; n < frame.length; n += 1) {
-      const angle = angularFactor * n;
-      real += frame[n] * Math.cos(angle);
-      imag += frame[n] * Math.sin(angle);
-    }
-
-    magnitudes[k] = Math.sqrt(real * real + imag * imag);
-  }
-
-  return magnitudes;
-}
-
-function audioBufferToSpectrogramMatrix(audioBuffer) {
+function buildRgbSpectrogramFromAudio(audioBuffer) {
   const samples = getMonoChannelData(audioBuffer);
-  const windowSize = state.stftWindowSize;
-  const hopSize = state.stftHopSize;
-  const binCount = windowSize / 2;
-  const hannWindow = createHannWindow(windowSize);
+  const fftSize = state.fftSize;
+  const hopSize = state.hopSize;
+  const binCount = state.binCount;
 
-  const frameCount = Math.max(1, Math.floor((samples.length - windowSize) / hopSize) + 1);
-  const matrix = create2DArray(frameCount, binCount);
+  const window = createHannWindow(fftSize);
+  const frameCount = Math.max(1, Math.floor((samples.length - fftSize) / hopSize) + 1);
 
-  let globalMax = 0;
+  const realBins = create2DArray(frameCount, binCount);
+  const imagBins = create2DArray(frameCount, binCount);
+
+  let maxAbsComplex = 1e-8;
+  let maxMagnitude = 1e-8;
 
   for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
     const start = frameIndex * hopSize;
-    const frame = new Float32Array(windowSize);
+    const real = new Float32Array(fftSize);
+    const imag = new Float32Array(fftSize);
 
-    for (let i = 0; i < windowSize; i += 1) {
-      const sample = samples[start + i] || 0;
-      frame[i] = sample * hannWindow[i];
+    for (let i = 0; i < fftSize; i += 1) {
+      real[i] = (samples[start + i] || 0) * window[i];
     }
 
-    const magnitudes = computeMagnitudeSpectrum(frame, binCount);
+    fftComplex(real, imag, false);
 
     for (let binIndex = 0; binIndex < binCount; binIndex += 1) {
-      const value = magnitudes[binIndex];
-      if (value > globalMax) {
-        globalMax = value;
-      }
-      matrix[binCount - 1 - binIndex][frameIndex] = value;
+      const displayRow = binCount - 1 - binIndex;
+      const r = real[binIndex];
+      const g = imag[binIndex];
+      const mag = Math.sqrt(r * r + g * g);
+
+      realBins[displayRow][frameIndex] = r;
+      imagBins[displayRow][frameIndex] = g;
+
+      maxAbsComplex = Math.max(maxAbsComplex, Math.abs(r), Math.abs(g));
+      maxMagnitude = Math.max(maxMagnitude, mag);
     }
   }
 
-  if (globalMax <= 0) {
-    globalMax = 1;
-  }
+  const image = createRgbImage(frameCount, binCount);
 
   for (let y = 0; y < binCount; y += 1) {
     for (let x = 0; x < frameCount; x += 1) {
-      const normalized = matrix[y][x] / globalMax;
-      const shaped = Math.pow(normalized, 0.45);
-      matrix[y][x] = clamp(shaped, 0, 1);
+      const r = realBins[y][x] / maxAbsComplex;
+      const g = imagBins[y][x] / maxAbsComplex;
+      const mag = Math.sqrt(realBins[y][x] * realBins[y][x] + imagBins[y][x] * imagBins[y][x]) / maxMagnitude;
+
+      image.r[y][x] = clamp(r * 0.5 + 0.5, 0, 1);
+      image.g[y][x] = clamp(g * 0.5 + 0.5, 0, 1);
+      image.b[y][x] = clamp(Math.pow(mag, 0.5), 0, 1);
     }
   }
 
-  return matrix;
+  return image;
 }
 
-function matrixToCanvas(matrix) {
-  const height = matrix.length;
-  const width = matrix[0].length;
+function drawRgbImageToCanvas(image) {
+  const width = getImageWidth(image);
+  const height = getImageHeight(image);
 
   spectrogramCanvas.width = width;
   spectrogramCanvas.height = height;
@@ -225,11 +350,10 @@ function matrixToCanvas(matrix) {
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const brightness = Math.round(clamp(matrix[y][x], 0, 1) * 255);
       const index = (y * width + x) * 4;
-      data[index] = brightness;
-      data[index + 1] = brightness;
-      data[index + 2] = brightness;
+      data[index] = Math.round(clamp(image.r[y][x], 0, 1) * 255);
+      data[index + 1] = Math.round(clamp(image.g[y][x], 0, 1) * 255);
+      data[index + 2] = Math.round(clamp(image.b[y][x], 0, 1) * 255);
       data[index + 3] = 255;
     }
   }
@@ -237,169 +361,246 @@ function matrixToCanvas(matrix) {
   spectrogramContext.putImageData(imageData, 0, 0);
 }
 
-function applyNoise(matrix, amountPercent) {
-  const amount = amountPercent / 100;
-  const output = cloneMatrix(matrix);
+function rgbToMagnitudePhase(image) {
+  const height = getImageHeight(image);
+  const width = getImageWidth(image);
 
-  for (let y = 0; y < output.length; y += 1) {
-    for (let x = 0; x < output[0].length; x += 1) {
-      const noise = (Math.random() * 2 - 1) * amount;
-      output[y][x] = clamp(output[y][x] + noise, 0, 1);
+  const magnitude = create2DArray(width, height);
+  const phase = create2DArray(width, height);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const real = (image.r[y][x] - 0.5) * 2;
+      const imag = (image.g[y][x] - 0.5) * 2;
+
+      magnitude[y][x] = clamp(Math.sqrt(real * real + imag * imag), 0, 1);
+      phase[y][x] = Math.atan2(imag, real);
     }
   }
 
-  return output;
+  return { magnitude, phase };
 }
 
-function applyBrightness(matrix, amountPercent) {
-  const multiplier = 1 + amountPercent / 100;
-  const output = cloneMatrix(matrix);
+function magnitudePhaseToRgb(magnitude, phase) {
+  const height = magnitude.length;
+  const width = magnitude[0].length;
 
-  for (let y = 0; y < output.length; y += 1) {
-    for (let x = 0; x < output[0].length; x += 1) {
-      output[y][x] = clamp(output[y][x] * multiplier, 0, 1);
+  const image = createRgbImage(width, height);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const mag = clamp(magnitude[y][x], 0, 1);
+      const ph = phase[y][x];
+
+      const real = Math.cos(ph) * mag;
+      const imag = Math.sin(ph) * mag;
+
+      image.r[y][x] = clamp(real * 0.5 + 0.5, 0, 1);
+      image.g[y][x] = clamp(imag * 0.5 + 0.5, 0, 1);
+      image.b[y][x] = clamp(mag, 0, 1);
     }
   }
 
-  return output;
+  return image;
 }
 
-function applyPitchShift(matrix, amountPercent) {
-  const height = matrix.length;
-  const width = matrix[0].length;
+function canonicalizeRgbImage(image) {
+  const { magnitude, phase } = rgbToMagnitudePhase(image);
+  return magnitudePhaseToRgb(magnitude, phase);
+}
+
+function blurChannel(channel, radius) {
+  const height = channel.length;
+  const width = channel[0].length;
+
+  if (radius <= 0) {
+    return clone2D(channel);
+  }
+
+  const temp = create2DArray(width, height);
   const output = create2DArray(width, height);
-  const shift = Math.round((amountPercent / 100) * (height * 0.35));
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let total = 0;
+      let count = 0;
+
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        const sampleX = x + offset;
+        if (sampleX >= 0 && sampleX < width) {
+          total += channel[y][sampleX];
+          count += 1;
+        }
+      }
+
+      temp[y][x] = total / count;
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let total = 0;
+      let count = 0;
+
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        const sampleY = y + offset;
+        if (sampleY >= 0 && sampleY < height) {
+          total += temp[sampleY][x];
+          count += 1;
+        }
+      }
+
+      output[y][x] = total / count;
+    }
+  }
+
+  return output;
+}
+
+function applyNoise(image, amountPercent) {
+  const { magnitude, phase } = rgbToMagnitudePhase(image);
+  const outputMagnitude = clone2D(magnitude);
+
+  const amount = amountPercent / 100;
+  const height = outputMagnitude.length;
+  const width = outputMagnitude[0].length;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const structuredAmount = amount * (0.35 + outputMagnitude[y][x] * 0.65);
+      const delta = (Math.random() * 2 - 1) * structuredAmount;
+      outputMagnitude[y][x] = clamp(outputMagnitude[y][x] + delta, 0, 1);
+    }
+  }
+
+  return magnitudePhaseToRgb(outputMagnitude, phase);
+}
+
+function applyBrightness(image, amountPercent) {
+  const { magnitude, phase } = rgbToMagnitudePhase(image);
+  const outputMagnitude = clone2D(magnitude);
+
+  const amount = amountPercent / 100;
+  const height = outputMagnitude.length;
+  const width = outputMagnitude[0].length;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (amount >= 0) {
+        const multiplier = 1 + amount * 2.5;
+        outputMagnitude[y][x] = clamp(outputMagnitude[y][x] * multiplier, 0, 1);
+      } else {
+        const multiplier = Math.max(0, 1 + amount);
+        outputMagnitude[y][x] = clamp(outputMagnitude[y][x] * multiplier, 0, 1);
+      }
+    }
+  }
+
+  return magnitudePhaseToRgb(outputMagnitude, phase);
+}
+
+function applyPitchShift(image, amountPercent) {
+  const { magnitude, phase } = rgbToMagnitudePhase(image);
+
+  const height = magnitude.length;
+  const width = magnitude[0].length;
+  const shift = Math.round((amountPercent / 100) * (height * 0.22));
+
+  const shiftedMagnitude = create2DArray(width, height);
+  const shiftedPhase = create2DArray(width, height);
 
   for (let y = 0; y < height; y += 1) {
     const sourceY = y - shift;
+
     for (let x = 0; x < width; x += 1) {
       if (sourceY >= 0 && sourceY < height) {
-        output[y][x] = matrix[sourceY][x];
+        const edgeFade = 1 - Math.min(1, Math.abs(shift) / Math.max(1, height * 0.5));
+        shiftedMagnitude[y][x] = magnitude[sourceY][x] * Math.max(0.35, edgeFade);
+        shiftedPhase[y][x] = phase[sourceY][x];
       } else {
-        output[y][x] = 0;
+        shiftedMagnitude[y][x] = 0;
+        shiftedPhase[y][x] = 0;
       }
     }
   }
 
-  return output;
+  return magnitudePhaseToRgb(shiftedMagnitude, shiftedPhase);
 }
 
-function applyBlur(matrix, amountPercent) {
-  const passes = Math.max(0, Math.round((amountPercent / 100) * 6));
-  if (passes <= 0) {
-    return cloneMatrix(matrix);
+function applyBlur(image, amountPercent) {
+  const { magnitude, phase } = rgbToMagnitudePhase(image);
+  const radius = Math.max(0, Math.round((amountPercent / 100) * 18));
+
+  if (radius <= 0) {
+    return magnitudePhaseToRgb(magnitude, phase);
   }
 
-  let current = cloneMatrix(matrix);
-  const height = current.length;
-  const width = current[0].length;
+  const blurredMagnitude = blurChannel(magnitude, radius);
+  const mix = amountPercent / 100;
+  const mixedMagnitude = create2DArray(magnitude[0].length, magnitude.length);
 
-  for (let pass = 0; pass < passes; pass += 1) {
-    const next = create2DArray(width, height);
-
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        let total = 0;
-        let count = 0;
-
-        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
-          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-            const sampleY = y + offsetY;
-            const sampleX = x + offsetX;
-
-            if (sampleY >= 0 && sampleY < height && sampleX >= 0 && sampleX < width) {
-              total += current[sampleY][sampleX];
-              count += 1;
-            }
-          }
-        }
-
-        next[y][x] = total / count;
-      }
-    }
-
-    current = next;
-  }
-
-  return current;
-}
-
-function remapRamp(value, amountPercent) {
-  const pivot = amountPercent / 100;
-
-  if (value <= pivot) {
-    return pivot === 0 ? 0 : (value / pivot) * 0.5;
-  }
-
-  return pivot === 1 ? 1 : 0.5 + ((value - pivot) / (1 - pivot)) * 0.5;
-}
-
-function applyRamp(matrix, amountPercent) {
-  const output = cloneMatrix(matrix);
-
-  for (let y = 0; y < output.length; y += 1) {
-    for (let x = 0; x < output[0].length; x += 1) {
-      output[y][x] = clamp(remapRamp(output[y][x], amountPercent), 0, 1);
+  for (let y = 0; y < magnitude.length; y += 1) {
+    for (let x = 0; x < magnitude[0].length; x += 1) {
+      mixedMagnitude[y][x] = clamp(lerp(magnitude[y][x], blurredMagnitude[y][x], mix), 0, 1);
     }
   }
 
-  return output;
+  return magnitudePhaseToRgb(mixedMagnitude, phase);
 }
 
-function applyClampEffect(matrix, amountPercent) {
-  const floorAmount = amountPercent / 100;
-  const output = cloneMatrix(matrix);
+function applyClampEffect(image, amountPercent) {
+  const { magnitude, phase } = rgbToMagnitudePhase(image);
+  const outputMagnitude = clone2D(magnitude);
 
-  for (let y = 0; y < output.length; y += 1) {
-    for (let x = 0; x < output[0].length; x += 1) {
-      const value = output[y][x];
-      output[y][x] = value < floorAmount ? 0 : value;
+  const threshold = amountPercent / 100;
+  const height = outputMagnitude.length;
+  const width = outputMagnitude[0].length;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      outputMagnitude[y][x] = outputMagnitude[y][x] <= threshold ? 0 : outputMagnitude[y][x];
     }
   }
 
-  return output;
+  return magnitudePhaseToRgb(outputMagnitude, phase);
 }
 
-function applyInvert(matrix) {
-  const output = cloneMatrix(matrix);
+function applyInvert(image) {
+  const { magnitude, phase } = rgbToMagnitudePhase(image);
+  const outputMagnitude = clone2D(magnitude);
 
-  for (let y = 0; y < output.length; y += 1) {
-    for (let x = 0; x < output[0].length; x += 1) {
-      output[y][x] = 1 - output[y][x];
+  const height = outputMagnitude.length;
+  const width = outputMagnitude[0].length;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      outputMagnitude[y][x] = 1 - outputMagnitude[y][x];
     }
   }
 
-  return output;
+  return magnitudePhaseToRgb(outputMagnitude, phase);
 }
 
-function applyAllEffects() {
-  if (!state.baseMatrix) {
-    return;
-  }
+function applyAllEffectsToImage(baseImage) {
+  let working = cloneRgbImage(baseImage);
 
-  let working = cloneMatrix(state.baseMatrix);
-
-  if (effectNoiseEnabled.checked) {
+  if (effectNoiseEnabled.checked && Number(effectNoiseAmount.value) > 0) {
     working = applyNoise(working, Number(effectNoiseAmount.value));
   }
 
-  if (effectPitchEnabled.checked) {
+  if (effectPitchEnabled.checked && Number(effectPitchAmount.value) !== 0) {
     working = applyPitchShift(working, Number(effectPitchAmount.value));
   }
 
-  if (effectBrightnessEnabled.checked) {
-    working = applyBrightness(working, Number(effectBrightnessAmount.value));
+  if (effectBrightnessEnabled.checked && Number(effectBrightnessAmount.value) !== 0) {
+    working = applyBrightness(working, -Number(effectBrightnessAmount.value));
   }
 
-  if (effectBlurEnabled.checked) {
+  if (effectBlurEnabled.checked && Number(effectBlurAmount.value) > 0) {
     working = applyBlur(working, Number(effectBlurAmount.value));
   }
 
-  if (effectRampEnabled.checked) {
-    working = applyRamp(working, Number(effectRampAmount.value));
-  }
-
-  if (effectClampEnabled.checked) {
+  if (effectClampEnabled.checked && Number(effectClampAmount.value) > 0) {
     working = applyClampEffect(working, Number(effectClampAmount.value));
   }
 
@@ -407,8 +608,16 @@ function applyAllEffects() {
     working = applyInvert(working);
   }
 
-  state.processedMatrix = working;
-  matrixToCanvas(state.processedMatrix);
+  return working;
+}
+
+function applyAllEffects() {
+  if (!state.baseImage) {
+    return;
+  }
+
+  state.processedImage = applyAllEffectsToImage(state.baseImage);
+  drawRgbImageToCanvas(state.processedImage);
 }
 
 async function decodeBlobToAudioBuffer(blob) {
@@ -417,7 +626,7 @@ async function decodeBlobToAudioBuffer(blob) {
 }
 
 function updateInfoLabels() {
-  if (!state.selectedAudioBuffer || !state.baseMatrix) {
+  if (!state.selectedAudioBuffer || !state.baseImage) {
     imageWidthLabel.textContent = "-";
     imageHeightLabel.textContent = "-";
     audioDurationLabel.textContent = "-";
@@ -425,8 +634,8 @@ function updateInfoLabels() {
     return;
   }
 
-  imageWidthLabel.textContent = `${state.baseMatrix[0].length}px`;
-  imageHeightLabel.textContent = `${state.baseMatrix.length}px`;
+  imageWidthLabel.textContent = `${getImageWidth(state.baseImage)}px`;
+  imageHeightLabel.textContent = `${getImageHeight(state.baseImage)}px`;
   audioDurationLabel.textContent = formatSeconds(state.selectedAudioBuffer.duration);
   sampleRateLabel.textContent = `${state.selectedAudioBuffer.sampleRate} Hz`;
 }
@@ -442,17 +651,26 @@ function clearOutputAudio() {
   outputAudioPlayer.removeAttribute("src");
   outputAudioPlayer.load();
   outputAudioPlayer.classList.add("hidden");
-  downloadAudioButton.disabled = true;
   state.lastOutputBlob = null;
+  setOutputStatus("");
+  updateButtonStates();
 }
 
 function resetImageStateForNewAudio() {
-  state.baseMatrix = null;
-  state.processedMatrix = null;
-  state.lockedMatrix = null;
+  state.baseImage = null;
+  state.processedImage = null;
   state.importedImageInUse = false;
   imageFileInput.value = "";
   clearOutputAudio();
+  updateInfoLabels();
+  updateButtonStates();
+}
+
+function validatePowerOfTwoResolution() {
+  const value = Number(yResSelect.value);
+  if ((value & (value - 1)) !== 0) {
+    throw new Error("Y resolution must be a power of 2.");
+  }
 }
 
 audioFileInput.addEventListener("change", async (event) => {
@@ -466,12 +684,25 @@ audioFileInput.addEventListener("change", async (event) => {
     resetImageStateForNewAudio();
     state.selectedAudioBlob = file;
     state.selectedAudioBuffer = await decodeBlobToAudioBuffer(file);
-    convertToImageButton.disabled = false;
     setInputStatus(`Loaded: ${file.name}`);
     updateInfoLabels();
+    updateButtonStates();
   } catch (error) {
     console.error(error);
     setInputStatus("Could not read that audio file.");
+  }
+});
+
+yResSelect.addEventListener("change", () => {
+  if (state.baseImage) {
+    setInputStatus("Y resolution changed. Re-convert the audio to use the new resolution.");
+    state.baseImage = null;
+    state.processedImage = null;
+    state.importedImageInUse = false;
+    imageFileInput.value = "";
+    clearOutputAudio();
+    updateInfoLabels();
+    updateButtonStates();
   }
 });
 
@@ -499,7 +730,6 @@ startRecordButton.addEventListener("click", async () => {
         const blob = new Blob(state.recordedChunks, { type: state.mediaRecorder.mimeType || "audio/webm" });
         state.selectedAudioBlob = blob;
         state.selectedAudioBuffer = await decodeBlobToAudioBuffer(blob);
-        convertToImageButton.disabled = false;
         setInputStatus("Recording ready.");
         updateInfoLabels();
       } catch (error) {
@@ -515,16 +745,14 @@ startRecordButton.addEventListener("click", async () => {
 
       state.mediaStream = null;
       state.mediaRecorder = null;
-      startRecordButton.disabled = false;
-      stopRecordButton.disabled = true;
       recordingStatus.textContent = "Not recording";
+      updateButtonStates();
     };
 
     state.mediaRecorder.start();
-    startRecordButton.disabled = true;
-    stopRecordButton.disabled = false;
     recordingStatus.textContent = "Recording...";
     setInputStatus("Recording microphone audio...");
+    updateButtonStates();
   } catch (error) {
     console.error(error);
     setInputStatus("Microphone access failed.");
@@ -544,28 +772,26 @@ convertToImageButton.addEventListener("click", async () => {
   }
 
   try {
-    setInputStatus("Converting audio to image...");
+    validatePowerOfTwoResolution();
+    configureResolutionSettings();
+
+    setInputStatus(`Converting audio to RGB image at ${state.binCount} Y resolution...`);
     clearOutputAudio();
 
-    state.baseMatrix = audioBufferToSpectrogramMatrix(state.selectedAudioBuffer);
-    state.processedMatrix = cloneMatrix(state.baseMatrix);
-    state.lockedMatrix = null;
+    const generatedImage = buildRgbSpectrogramFromAudio(state.selectedAudioBuffer);
+    state.baseImage = canonicalizeRgbImage(generatedImage);
+    state.processedImage = cloneRgbImage(state.baseImage);
     state.importedImageInUse = false;
 
-    state.imageWidth = state.baseMatrix[0].length;
-    state.imageHeight = state.baseMatrix.length;
+    state.imageWidth = getImageWidth(state.baseImage);
+    state.imageHeight = getImageHeight(state.baseImage);
 
-    matrixToCanvas(state.processedMatrix);
+    drawRgbImageToCanvas(state.processedImage);
     updateInfoLabels();
 
-    updatePreviewButton.disabled = false;
-    continueButton.disabled = false;
-    downloadPngButton.disabled = false;
-    buildAudioButton.disabled = false;
-
-    setInputStatus("Audio converted to image.");
-    setEffectsStatus("Ready for effects. Press Update Preview after changing settings.");
-    setOutputStatus("");
+    setInputStatus("Audio converted to RGB image.");
+    setEffectsStatus("Ready for effects. Update Preview is optional.");
+    updateButtonStates();
   } catch (error) {
     console.error(error);
     setInputStatus("Failed to convert audio to image.");
@@ -591,12 +817,12 @@ async function loadImageFromFile(file) {
 }
 
 function validateAndConvertImportedImage(image) {
-  if (!state.baseMatrix) {
+  if (!state.baseImage) {
     throw new Error("Convert audio to image first so the required image format is known.");
   }
 
-  const requiredWidth = state.baseMatrix[0].length;
-  const requiredHeight = state.baseMatrix.length;
+  const requiredWidth = getImageWidth(state.baseImage);
+  const requiredHeight = getImageHeight(state.baseImage);
 
   if (image.width !== requiredWidth || image.height !== requiredHeight) {
     throw new Error(
@@ -607,13 +833,13 @@ function validateAndConvertImportedImage(image) {
   const tempCanvas = document.createElement("canvas");
   tempCanvas.width = image.width;
   tempCanvas.height = image.height;
-  const tempContext = tempCanvas.getContext("2d");
+  const tempContext = tempCanvas.getContext("2d", { willReadFrequently: true });
 
   tempContext.drawImage(image, 0, 0);
   const imageData = tempContext.getImageData(0, 0, image.width, image.height);
   const data = imageData.data;
 
-  const matrix = create2DArray(image.width, image.height);
+  const rgbImage = createRgbImage(image.width, image.height);
 
   for (let y = 0; y < image.height; y += 1) {
     for (let x = 0; x < image.width; x += 1) {
@@ -627,15 +853,13 @@ function validateAndConvertImportedImage(image) {
         throw new Error("Image must not use transparency.");
       }
 
-      if (!(r === g && g === b)) {
-        throw new Error("Image must be grayscale only. RGB values must match for every pixel.");
-      }
-
-      matrix[y][x] = r / 255;
+      rgbImage.r[y][x] = r / 255;
+      rgbImage.g[y][x] = g / 255;
+      rgbImage.b[y][x] = b / 255;
     }
   }
 
-  return matrix;
+  return canonicalizeRgbImage(rgbImage);
 }
 
 imageFileInput.addEventListener("change", async (event) => {
@@ -649,16 +873,15 @@ imageFileInput.addEventListener("change", async (event) => {
     clearOutputAudio();
 
     const image = await loadImageFromFile(file);
-    const importedMatrix = validateAndConvertImportedImage(image);
+    const importedImage = validateAndConvertImportedImage(image);
 
-    state.baseMatrix = importedMatrix;
-    state.processedMatrix = cloneMatrix(importedMatrix);
-    state.lockedMatrix = null;
+    state.baseImage = importedImage;
+    state.processedImage = cloneRgbImage(importedImage);
     state.importedImageInUse = true;
 
-    matrixToCanvas(state.processedMatrix);
+    drawRgbImageToCanvas(state.processedImage);
     setEffectsStatus("Imported image accepted and loaded.");
-    setOutputStatus("");
+    updateButtonStates();
   } catch (error) {
     console.error(error);
     imageFileInput.value = "";
@@ -669,15 +892,38 @@ imageFileInput.addEventListener("change", async (event) => {
 function hookEffectControl(inputElement, checkboxElement) {
   inputElement.addEventListener("input", () => {
     updateSliderLabels();
-    if (state.baseMatrix) {
-      setEffectsStatus("Settings changed. Press Update Preview.");
+    if (state.baseImage) {
+      setEffectsStatus("Settings changed.");
+    }
+  });
+
+  inputElement.addEventListener("change", () => {
+    updateSliderLabels();
+    if (state.baseImage) {
+      setEffectsStatus("Settings changed.");
     }
   });
 
   checkboxElement.addEventListener("change", () => {
     updateSliderLabels();
-    if (state.baseMatrix) {
-      setEffectsStatus("Settings changed. Press Update Preview.");
+    if (state.baseImage) {
+      setEffectsStatus("Settings changed.");
+    }
+  });
+}
+
+function hookOutputControl(inputElement) {
+  inputElement.addEventListener("input", () => {
+    updateSliderLabels();
+    if (state.baseImage) {
+      setOutputStatus("Output settings changed.");
+    }
+  });
+
+  inputElement.addEventListener("change", () => {
+    updateSliderLabels();
+    if (state.baseImage) {
+      setOutputStatus("Output settings changed.");
     }
   });
 }
@@ -686,113 +932,282 @@ hookEffectControl(effectNoiseAmount, effectNoiseEnabled);
 hookEffectControl(effectPitchAmount, effectPitchEnabled);
 hookEffectControl(effectBrightnessAmount, effectBrightnessEnabled);
 hookEffectControl(effectBlurAmount, effectBlurEnabled);
-hookEffectControl(effectRampAmount, effectRampEnabled);
 hookEffectControl(effectClampAmount, effectClampEnabled);
 
 effectInvertEnabled.addEventListener("change", () => {
   updateSliderLabels();
-  if (state.baseMatrix) {
-    setEffectsStatus("Settings changed. Press Update Preview.");
+  if (state.baseImage) {
+    setEffectsStatus("Settings changed.");
   }
 });
 
+hookOutputControl(outputGainAmount);
+hookOutputControl(outputLimitAmount);
+
 updatePreviewButton.addEventListener("click", () => {
-  if (!state.baseMatrix) {
+  if (!state.baseImage) {
     setEffectsStatus("Convert audio to image first.");
     return;
   }
 
   clearOutputAudio();
-  state.lockedMatrix = null;
   applyAllEffects();
   setEffectsStatus("Preview updated.");
-  setOutputStatus("");
-});
-
-continueButton.addEventListener("click", () => {
-  if (!state.processedMatrix) {
-    setEffectsStatus("Update the preview first.");
-    return;
-  }
-
-  state.lockedMatrix = cloneMatrix(state.processedMatrix);
-  setEffectsStatus("Processed image locked in. You can now build audio.");
+  updateButtonStates();
 });
 
 downloadPngButton.addEventListener("click", () => {
-  if (!state.processedMatrix) {
+  if (!state.processedImage) {
     setEffectsStatus("No image to download yet.");
     return;
   }
 
   const link = document.createElement("a");
   link.href = spectrogramCanvas.toDataURL("image/png");
-  link.download = "audio-image-processing.png";
+  link.download = "audio-image-processing-rgb.png";
   link.click();
   setEffectsStatus("PNG downloaded.");
 });
 
-function buildFrequencyMap(binCount, sampleRate) {
-  const frequencies = new Float32Array(binCount);
-  const maxFrequency = sampleRate / 2;
-  const minFrequency = 30;
-
-  for (let i = 0; i < binCount; i += 1) {
-    const ratio = i / Math.max(1, binCount - 1);
-    frequencies[i] = lerp(maxFrequency, minFrequency, ratio);
-  }
-
-  return frequencies;
-}
-
-function matrixToAudioBuffer(matrix, sampleRate, hopSize) {
-  const height = matrix.length;
-  const width = matrix[0].length;
-  const outputLength = width * hopSize + sampleRate;
-  const output = new Float32Array(outputLength);
-
-  const frequencies = buildFrequencyMap(height, sampleRate);
-  const phases = new Float32Array(height);
+function rgbImageToComplexFrames(image) {
+  const width = getImageWidth(image);
+  const height = getImageHeight(image);
+  const framesReal = new Array(width);
+  const framesImag = new Array(width);
 
   for (let x = 0; x < width; x += 1) {
-    const frameStart = x * hopSize;
+    const real = new Float32Array(state.fftSize);
+    const imag = new Float32Array(state.fftSize);
 
-    for (let i = 0; i < hopSize; i += 1) {
-      let sampleValue = 0;
-      const globalIndex = frameStart + i;
+    for (let displayRow = 0; displayRow < height; displayRow += 1) {
+      const binIndex = height - 1 - displayRow;
 
-      for (let y = 0; y < height; y += 1) {
-        const amplitude = Math.pow(matrix[y][x], 1.7) * 0.02;
-        if (amplitude <= 0.00005) {
-          continue;
-        }
+      const realValue = (image.r[displayRow][x] - 0.5) * 2;
+      const imagValue = (image.g[displayRow][x] - 0.5) * 2;
 
-        const phaseStep = (2 * Math.PI * frequencies[y]) / sampleRate;
-        phases[y] += phaseStep;
-        sampleValue += Math.sin(phases[y]) * amplitude;
+      real[binIndex] = realValue;
+      imag[binIndex] = imagValue;
+
+      if (binIndex > 0 && binIndex < state.fftSize / 2) {
+        real[state.fftSize - binIndex] = realValue;
+        imag[state.fftSize - binIndex] = -imagValue;
       }
+    }
 
-      output[globalIndex] += sampleValue;
+    framesReal[x] = real;
+    framesImag[x] = imag;
+  }
+
+  return { framesReal, framesImag };
+}
+
+function istftFromRgbImage(image) {
+  const width = getImageWidth(image);
+  const fftSize = state.fftSize;
+  const hopSize = state.hopSize;
+  const window = createHannWindow(fftSize);
+
+  const outputLength = (width - 1) * hopSize + fftSize;
+  const output = new Float32Array(outputLength);
+  const normalization = new Float32Array(outputLength);
+
+  const { framesReal, framesImag } = rgbImageToComplexFrames(image);
+
+  for (let frameIndex = 0; frameIndex < width; frameIndex += 1) {
+    const real = framesReal[frameIndex];
+    const imag = framesImag[frameIndex];
+
+    fftComplex(real, imag, true);
+
+    const start = frameIndex * hopSize;
+    for (let i = 0; i < fftSize; i += 1) {
+      const windowed = real[i] * window[i];
+      output[start + i] += windowed;
+      normalization[start + i] += window[i] * window[i];
     }
   }
 
-  let maxAmplitude = 0;
   for (let i = 0; i < output.length; i += 1) {
-    const absoluteValue = Math.abs(output[i]);
+    if (normalization[i] > 1e-8) {
+      output[i] /= normalization[i];
+    }
+  }
+
+  return output;
+}
+
+function getSignalPeak(signal) {
+  let maxAmplitude = 0;
+  for (let i = 0; i < signal.length; i += 1) {
+    const absoluteValue = Math.abs(signal[i]);
     if (absoluteValue > maxAmplitude) {
       maxAmplitude = absoluteValue;
     }
   }
+  return maxAmplitude;
+}
 
-  if (maxAmplitude > 0) {
-    const normalizeMultiplier = 0.92 / maxAmplitude;
-    for (let i = 0; i < output.length; i += 1) {
-      output[i] *= normalizeMultiplier;
+function removeDcOffset(signal) {
+  if (signal.length === 0) {
+    return signal;
+  }
+
+  let mean = 0;
+  for (let i = 0; i < signal.length; i += 1) {
+    mean += signal[i];
+  }
+  mean /= signal.length;
+
+  for (let i = 0; i < signal.length; i += 1) {
+    signal[i] -= mean;
+  }
+
+  return signal;
+}
+
+function normalizeSignal(signal, targetPeak = 0.98) {
+  const peak = getSignalPeak(signal);
+  if (peak > 0) {
+    const multiplier = targetPeak / peak;
+    for (let i = 0; i < signal.length; i += 1) {
+      signal[i] *= multiplier;
+    }
+  }
+  return signal;
+}
+
+function softClipSignal(signal, drive = 1.0) {
+  for (let i = 0; i < signal.length; i += 1) {
+    signal[i] = Math.tanh(signal[i] * drive);
+  }
+  return signal;
+}
+
+function hardLimitTransientSpikes(signal, threshold = 0.12) {
+  for (let i = 0; i < signal.length; i += 1) {
+    if (signal[i] > threshold) {
+      signal[i] = threshold;
+    } else if (signal[i] < -threshold) {
+      signal[i] = -threshold;
+    }
+  }
+  return signal;
+}
+
+function getWindowRmsValues(signal, windowSize, hopSize) {
+  const values = [];
+  for (let start = 0; start < signal.length; start += hopSize) {
+    const end = Math.min(signal.length, start + windowSize);
+    let sum = 0;
+    let count = 0;
+
+    for (let i = start; i < end; i += 1) {
+      sum += signal[i] * signal[i];
+      count += 1;
+    }
+
+    if (count > 0) {
+      values.push(Math.sqrt(sum / count));
+    }
+  }
+  return values;
+}
+
+function percentile(values, p) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = Array.from(values).sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * p)));
+  return sorted[index];
+}
+
+function applyWindowedLoudnessNormalization(signal, gateRatio, targetRms) {
+  const windowRmsValues = getWindowRmsValues(signal, WINDOW_RMS_SIZE, WINDOW_RMS_HOP);
+  const referenceRms = percentile(windowRmsValues, 0.95);
+
+  if (referenceRms <= 1e-8) {
+    return signal;
+  }
+
+  const gateThreshold = referenceRms * gateRatio;
+
+  let sum = 0;
+  let count = 0;
+
+  for (let start = 0; start < signal.length; start += WINDOW_RMS_HOP) {
+    const end = Math.min(signal.length, start + WINDOW_RMS_SIZE);
+
+    let windowSum = 0;
+    let windowCount = 0;
+    for (let i = start; i < end; i += 1) {
+      windowSum += signal[i] * signal[i];
+      windowCount += 1;
+    }
+
+    if (windowCount === 0) {
+      continue;
+    }
+
+    const rms = Math.sqrt(windowSum / windowCount);
+    if (rms >= gateThreshold) {
+      sum += windowSum;
+      count += windowCount;
     }
   }
 
-  const audioBuffer = audioContext.createBuffer(1, output.length, sampleRate);
-  audioBuffer.copyToChannel(output, 0);
+  if (count === 0) {
+    return signal;
+  }
+
+  const gatedRms = Math.sqrt(sum / count);
+  if (gatedRms <= 1e-8) {
+    return signal;
+  }
+
+  const gain = targetRms / gatedRms;
+
+  for (let i = 0; i < signal.length; i += 1) {
+    signal[i] *= gain;
+  }
+
+  return signal;
+}
+
+function applyManualGain(signal, multiplier) {
+  if (multiplier === 1) {
+    return signal;
+  }
+
+  for (let i = 0; i < signal.length; i += 1) {
+    signal[i] *= multiplier;
+  }
+
+  return signal;
+}
+
+function rgbImageToAudioBuffer(image, sampleRate) {
+  let signal = istftFromRgbImage(image);
+
+  const limiter = getLimiterSettings();
+  const manualGain = getManualGainMultiplier();
+
+  signal = removeDcOffset(signal);
+  signal = hardLimitTransientSpikes(signal, limiter.spikeThreshold);
+  signal = softClipSignal(signal, limiter.preClipDrive);
+  signal = applyWindowedLoudnessNormalization(signal, WINDOW_GATE_RATIO, TARGET_OUTPUT_RMS);
+
+  // Leave headroom before manual gain so the gain slider can actually do something.
+  signal = normalizeSignal(signal, PRE_MANUAL_HEADROOM_PEAK);
+
+  // Manual gain happens after the pre-normalize, so it is not cancelled out.
+  signal = applyManualGain(signal, manualGain);
+
+  // Final safety shaping based on Limit.
+  signal = softClipSignal(signal, limiter.postClipDrive);
+
+  const audioBuffer = audioContext.createBuffer(1, signal.length, sampleRate);
+  audioBuffer.copyToChannel(signal, 0);
   return audioBuffer;
 }
 
@@ -843,19 +1258,22 @@ buildAudioButton.addEventListener("click", async () => {
     return;
   }
 
-  const matrixToUse = state.lockedMatrix || state.processedMatrix;
-
-  if (!matrixToUse) {
-    setOutputStatus("You need an image first.");
+  if (!state.baseImage) {
+    setOutputStatus("Convert audio to image first.");
     return;
   }
 
   try {
-    setOutputStatus("Building audio from image...");
-    const rebuiltBuffer = matrixToAudioBuffer(
-      matrixToUse,
-      state.selectedAudioBuffer.sampleRate,
-      state.stftHopSize
+    setOutputStatus("Building audio from current settings...");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const imageToBuild = applyAllEffectsToImage(state.baseImage);
+    state.processedImage = cloneRgbImage(imageToBuild);
+    drawRgbImageToCanvas(state.processedImage);
+
+    const rebuiltBuffer = rgbImageToAudioBuffer(
+      imageToBuild,
+      state.selectedAudioBuffer.sampleRate
     );
 
     const wavBlob = audioBufferToWavBlob(rebuiltBuffer);
@@ -868,9 +1286,9 @@ buildAudioButton.addEventListener("click", async () => {
     state.lastOutputUrl = URL.createObjectURL(wavBlob);
     outputAudioPlayer.src = state.lastOutputUrl;
     outputAudioPlayer.classList.remove("hidden");
-    downloadAudioButton.disabled = false;
 
     setOutputStatus("Audio built. Preview it or download the WAV.");
+    updateButtonStates();
   } catch (error) {
     console.error(error);
     setOutputStatus("Could not build audio from image.");
@@ -893,6 +1311,7 @@ downloadAudioButton.addEventListener("click", () => {
 });
 
 updateSliderLabels();
+updateButtonStates();
 
 spectrogramContext.fillStyle = "#000000";
 spectrogramContext.fillRect(0, 0, spectrogramCanvas.width, spectrogramCanvas.height);
@@ -900,4 +1319,4 @@ spectrogramContext.fillStyle = "#94a3b8";
 spectrogramContext.font = "28px Arial";
 spectrogramContext.textAlign = "center";
 spectrogramContext.textBaseline = "middle";
-spectrogramContext.fillText("Your audio image will appear here", spectrogramCanvas.width / 2, spectrogramCanvas.height / 2);
+spectrogramContext.fillText("Your RGB audio image will appear here", spectrogramCanvas.width / 2, spectrogramCanvas.height / 2);
